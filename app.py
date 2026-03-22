@@ -4,12 +4,12 @@ from Bio import SeqIO
 import io
 import requests
 
-# 1. Page Configuration
-st.set_page_config(page_title="Universal Oncology Engine", layout="wide", page_icon="🧬")
-st.title("🧬 Universal Precision Oncology Engine")
+# 1. Page Configuration & Branding
+st.set_page_config(page_title="SeqSense Engine", layout="wide", page_icon="🧬")
+st.title("🧬 SeqSense: Precision Genomics Engine")
 st.write("Upload Healthy vs. Tumor FASTA files to identify clinical variants and fetch live biological data.")
 
-# 2. Local Database (The Triggers)
+# 2. Local Database (The Clinical Map)
 DRUG_DB = {
     31: {"gene": "BRAF", "variant": "V600E", "drug": "Vemurafenib", "type": "BRAF Inhibitor"},
     1047: {"gene": "PIK3CA", "variant": "H1047R", "drug": "Alpelisib", "type": "PI3K Inhibitor"}
@@ -34,7 +34,6 @@ def fetch_live_gene_data(gene_symbol):
         pass # If the internet drops, we silently fail and return the error text below
     
     return {"chromosome": "API Offline", "description": "Could not connect to live database."}
-
 
 # 4. SIDEBAR: File Uploaders
 st.sidebar.header("📁 Upload Genomic Data")
@@ -82,7 +81,6 @@ if healthy_file and tumor_file:
                 
                 st.subheader("📑 Clinical Diagnostic Report (Live Data)")
                 
-                # Updated Markdown Table to include our live API data!
                 md_table = "| Position | Change | Target Gene | 📍 Locus (Live) | 📖 Official Protein Name (Live) | Recommended Therapy |\n"
                 md_table += "|---|---|---|---|---|---|\n"
                 for m in mutations:
