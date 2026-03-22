@@ -2,33 +2,54 @@ import streamlit as st
 import matplotlib.pyplot as plt
 from Bio import SeqIO
 import io
+import requests
 
 # 1. Page Configuration
-st.set_page_config(page_title="Universal Oncology Engine", layout="wide")
+st.set_page_config(page_title="Universal Oncology Engine", layout="wide", page_icon="🧬")
 st.title("🧬 Universal Precision Oncology Engine")
-st.write("Upload Healthy vs. Tumor FASTA files to identify clinical variants.")
+st.write("Upload Healthy vs. Tumor FASTA files to identify clinical variants and fetch live biological data.")
 
-# 2. Pharmacogenomics Database (The Clinical Map)
+# 2. Local Database (The Triggers)
 DRUG_DB = {
     31: {"gene": "BRAF", "variant": "V600E", "drug": "Vemurafenib", "type": "BRAF Inhibitor"},
     1047: {"gene": "PIK3CA", "variant": "H1047R", "drug": "Alpelisib", "type": "PI3K Inhibitor"}
 }
 
-# 3. SIDEBAR: File Uploaders
+# 3. LIVE API CONNECTION (The Digital Waiter)
+@st.cache_data
+def fetch_live_gene_data(gene_symbol):
+    """Fetches live chromosome and description data from the NIH MyGene API."""
+    url = f"https://mygene.info/v3/query?q=symbol:{gene_symbol}&fields=symbol,name,map_location"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if 'hits' in data and len(data['hits']) > 0:
+                hit = data['hits'][0]
+                return {
+                    "chromosome": hit.get("map_location", "Unknown"),
+                    "description": hit.get("name", "Description pending")
+                }
+    except requests.exceptions.RequestException:
+        pass # If the internet drops, we silently fail and return the error text below
+    
+    return {"chromosome": "API Offline", "description": "Could not connect to live database."}
+
+
+# 4. SIDEBAR: File Uploaders
 st.sidebar.header("📁 Upload Genomic Data")
 healthy_file = st.sidebar.file_uploader("Upload Healthy Sequence", type=["fasta", "fa"])
 tumor_file = st.sidebar.file_uploader("Upload Tumor Sequence", type=["fasta", "fa"])
 
-# 4. Main Application Logic
+# 5. Main Application Logic
 if healthy_file and tumor_file:
-    if st.button("Run Diagnostic Scan"):
-        with st.spinner("Analyzing sequences..."):
+    if st.button("Run Diagnostic Scan & Fetch Live Data"):
+        with st.spinner("Aligning sequences and querying NIH databases..."):
             
-            # Read and Clean Data: Removing any hidden formatting issues
+            # Read and Clean Data
             h_raw = io.StringIO(healthy_file.getvalue().decode("utf-8"))
             t_raw = io.StringIO(tumor_file.getvalue().decode("utf-8"))
             
-            # Using str().strip().upper() ensures the comparison is 100% accurate
             healthy_dna = str(SeqIO.read(h_raw, "fasta").seq).strip().upper()
             tumor_dna = str(SeqIO.read(t_raw, "fasta").seq).strip().upper()
             
@@ -39,40 +60,46 @@ if healthy_file and tumor_file:
             for i in range(min_len):
                 if healthy_dna[i] != tumor_dna[i]:
                     pos = i + 1
-                    # Look up position in our Clinical Database
                     match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown", "drug": "Research Required", "type": "N/A"})
+                    
+                    # ⚡ THE MAGIC: If we recognize the gene, ping the API!
+                    live_info = {"chromosome": "N/A", "description": "N/A"}
+                    if match["gene"] != "Unknown":
+                        live_info = fetch_live_gene_data(match["gene"])
                     
                     mutations.append({
                         "Position": pos,
-                        "Healthy": healthy_dna[i],
-                        "Tumor": tumor_dna[i],
+                        "Mutation": f"{healthy_dna[i]} → {tumor_dna[i]}",
                         "Gene": f"{match['gene']} {match['variant']}",
-                        "Therapy": f"{match['drug']} ({match['type']})"
+                        "Therapy": f"{match['drug']} ({match['type']})",
+                        "Chromosome": live_info["chromosome"],
+                        "Description": live_info["description"]
                     })
             
-            # 5. Display Results
+            # 6. Display Dynamic Results
             if mutations:
                 st.error(f"🚨 {len(mutations)} Somatic Mutation(s) Detected!")
                 
-                st.subheader("📑 Clinical Diagnostic Report")
-                md_table = "| Position | Healthy | Tumor | Target Gene | Recommended Therapy |\n|---|---|---|---|---|\n"
+                st.subheader("📑 Clinical Diagnostic Report (Live Data)")
+                
+                # Updated Markdown Table to include our live API data!
+                md_table = "| Position | Change | Target Gene | 📍 Locus (Live) | 📖 Official Protein Name (Live) | Recommended Therapy |\n"
+                md_table += "|---|---|---|---|---|---|\n"
                 for m in mutations:
-                    md_table += f"| {m['Position']} | {m['Healthy']} | {m['Tumor']} | {m['Gene']} | {m['Therapy']} |\n"
+                    md_table += f"| {m['Position']} | **{m['Mutation']}** | {m['Gene']} | {m['Chromosome']} | _{m['Description']}_ | **{m['Therapy']}** |\n"
+                
                 st.markdown(md_table)
                 
                 # Visual Heatmap
                 st.subheader("📊 Genomic Mutation Heatmap")
                 fig, ax = plt.subplots(figsize=(10, 2))
                 ax.plot([1, min_len], [0, 0], color='lightgray', linewidth=6, zorder=1)
-                
                 x_positions = [m["Position"] for m in mutations]
                 ax.scatter(x_positions, [0]*len(mutations), color='red', s=150, zorder=2)
-                
                 ax.set_yticks([])
                 ax.set_xlabel("Genomic Position (Base Pairs)")
                 st.pyplot(fig)
             else:
                 st.success("✅ No mutations detected. Sequences are identical.")
-                st.info(f"Analyzed {min_len} base pairs.")
 else:
     st.info("👈 Please upload both FASTA files in the sidebar to begin.")
