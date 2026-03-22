@@ -1,4 +1,4 @@
-# 🧬 Precision Oncology Diagnostic Engine
+# 🧬 SeqSense: Precision Genomics Engine
 
 A bioinformatics web application built with Python and Streamlit that dynamically compares healthy and tumor DNA sequences to identify actionable somatic mutations. 
 
