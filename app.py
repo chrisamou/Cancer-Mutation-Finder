@@ -34,24 +34,28 @@ def fetch_live_gene_data(gene_symbol):
         pass
     return {"chromosome": "API Offline", "description": "Offline"}
 
-# ⚡ NEW: ENSEMBL API CONNECTION (Phase 2 Auto-Fetch)
+# ⚡ UPDATED: ENSEMBL API CONNECTION (Phase 2 Auto-Fetch)
 @st.cache_data
 def fetch_ensembl_reference(gene_symbol):
     """Fetches the official wild-type coding sequence (CDS) from Ensembl."""
     server = "https://rest.ensembl.org"
     try:
-        # Step A: Get the Ensembl ID for the gene symbol
-        ext_lookup = f"/lookup/symbol/homo_sapiens/{gene_symbol}"
-        res = requests.get(server + ext_lookup, headers={"Content-Type": "application/json"}, timeout=5)
+        # Step A: Get the Gene ID and expand it to see its transcripts
+        ext_lookup = f"/lookup/symbol/homo_sapiens/{gene_symbol}?expand=1"
+        res = requests.get(server + ext_lookup, headers={"Accept": "application/json"}, timeout=5)
         
         if res.ok:
-            gene_id = res.json().get("id")
-            # Step B: Download the raw sequence data
-            ext_seq = f"/sequence/id/{gene_id}?type=cds"
-            seq_res = requests.get(server + ext_seq, headers={"Content-Type": "text/plain"}, timeout=5)
-            
-            if seq_res.ok:
-                return seq_res.text.strip().upper()
+            data = res.json()
+            # Step B: Dive into the data to find the first Transcript ID
+            if "Transcript" in data and len(data["Transcript"]) > 0:
+                transcript_id = data["Transcript"][0]["id"]
+                
+                # Step C: Download the raw CDS sequence for that specific transcript
+                ext_seq = f"/sequence/id/{transcript_id}?type=cds"
+                seq_res = requests.get(server + ext_seq, headers={"Accept": "text/plain"}, timeout=5)
+                
+                if seq_res.ok:
+                    return seq_res.text.strip().upper()
     except requests.exceptions.RequestException:
         pass
     return None
@@ -84,14 +88,12 @@ if mode == "Single Patient":
     st.sidebar.header("📁 Upload Patient Data")
     tumor_file = st.sidebar.file_uploader("Upload Patient Sequence", type=["fasta", "fa"])
 
-    # Check if we have both the healthy DNA (from either source) and the tumor file
     if (healthy_file or (ref_method == "Auto-Fetch (Ensembl API)" and target_gene)) and tumor_file:
         if st.button("Run Diagnostic Scan"):
             
             healthy_dna = None
             
             with st.spinner("Fetching data and aligning sequences..."):
-                # ⚡ Resolve the Healthy DNA
                 if ref_method == "Auto-Fetch (Ensembl API)":
                     healthy_dna = fetch_ensembl_reference(target_gene)
                     if not healthy_dna:
@@ -101,13 +103,11 @@ if mode == "Single Patient":
                     h_raw = io.StringIO(healthy_file.getvalue().decode("utf-8"))
                     healthy_dna = str(SeqIO.read(h_raw, "fasta").seq).strip().upper()
 
-                # Process Tumor DNA
                 t_raw = io.StringIO(tumor_file.getvalue().decode("utf-8"))
                 tumor_dna = str(SeqIO.read(t_raw, "fasta").seq).strip().upper()
                 
-                # Warning if sequence lengths are vastly different (Biological Safety Check)
                 if abs(len(healthy_dna) - len(tumor_dna)) > 100:
-                    st.warning("⚠️ Length Mismatch Warning: The reference genome and patient genome have significantly different lengths. Alignment results may be skewed.")
+                    st.warning("⚠️ Length Mismatch Warning: The reference genome and patient genome have significantly different lengths. Ensure you are comparing the correct gene!")
 
                 mutations = []
                 min_len = min(len(healthy_dna), len(tumor_dna))
@@ -152,3 +152,86 @@ if mode == "Single Patient":
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.success("✅ No mutations detected.")
+
+# ---------------------------------------------------------
+# MODE 2: BATCH COHORT (The Big Data Upgrade)
+# ---------------------------------------------------------
+elif mode == "Batch Cohort (ZIP)":
+    st.sidebar.header("📁 Upload Clinical Trial Data")
+    zip_file = st.sidebar.file_uploader("Upload Patient Cohort (.zip)", type=["zip"])
+
+    if (healthy_file or (ref_method == "Auto-Fetch (Ensembl API)" and target_gene)) and zip_file:
+        if st.button("Run Cohort Batch Scan"):
+            
+            healthy_dna = None
+            
+            with st.spinner("Fetching data and processing massive cohort..."):
+                if ref_method == "Auto-Fetch (Ensembl API)":
+                    healthy_dna = fetch_ensembl_reference(target_gene)
+                    if not healthy_dna:
+                        st.error(f"❌ Could not locate sequence for {target_gene} in Ensembl database.")
+                        st.stop()
+                else:
+                    h_raw = io.StringIO(healthy_file.getvalue().decode("utf-8"))
+                    healthy_dna = str(SeqIO.read(h_raw, "fasta").seq).strip().upper()
+            
+            master_mutations = []
+            
+            with zipfile.ZipFile(zip_file, 'r') as z:
+                fasta_files = [f for f in z.namelist() if f.endswith(('.fasta', '.fa'))]
+                total_files = len(fasta_files)
+                
+                st.write(f"🔍 Found {total_files} patient sequences. Scanning...")
+                
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for idx, file_name in enumerate(fasta_files):
+                    status_text.text(f"Processing: {file_name} ({idx+1}/{total_files})")
+                    
+                    with z.open(file_name) as f:
+                        t_raw = io.StringIO(f.read().decode("utf-8"))
+                        tumor_dna = str(SeqIO.read(t_raw, "fasta").seq).strip().upper()
+                        
+                        min_len = min(len(healthy_dna), len(tumor_dna))
+                        for i in range(min_len):
+                            if healthy_dna[i] != tumor_dna[i]:
+                                pos = i + 1
+                                codon_start = (i // 3) * 3
+                                h_aa = str(Seq(healthy_dna[codon_start:codon_start+3]).translate()) if len(healthy_dna[codon_start:codon_start+3]) == 3 else "?"
+                                t_aa = str(Seq(tumor_dna[codon_start:codon_start+3]).translate()) if len(tumor_dna[codon_start:codon_start+3]) == 3 else "?"
+                                
+                                match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown"})
+                                
+                                master_mutations.append({
+                                    "Patient ID": file_name,
+                                    "Position": pos,
+                                    "DNA": f"{healthy_dna[i]} → {tumor_dna[i]}",
+                                    "Protein": f"{h_aa} → {t_aa}",
+                                    "Target Gene": match['gene']
+                                })
+                    
+                    progress_bar.progress((idx + 1) / total_files)
+            
+            status_text.text("✅ Cohort scan complete!")
+            
+            if master_mutations:
+                df_master = pd.DataFrame(master_mutations)
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.subheader("📑 Master Cohort Table")
+                    st.dataframe(df_master, use_container_width=True)
+                    csv = df_master.to_csv(index=False).encode('utf-8')
+                    st.download_button("📥 Download Cohort CSV", data=csv, file_name="cohort_report.csv", mime="text/csv")
+                
+                with col2:
+                    st.subheader("📊 Demographics")
+                    gene_counts = df_master['Target Gene'].value_counts().reset_index()
+                    gene_counts.columns = ['Gene', 'Count']
+                    pie_fig = px.pie(gene_counts, names='Gene', values='Count', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                    pie_fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
+                    st.plotly_chart(pie_fig, use_container_width=True)
+            else:
+                st.success("✅ No mutations detected in the entire cohort.")
