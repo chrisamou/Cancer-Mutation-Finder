@@ -1,6 +1,7 @@
 import streamlit as st
 import matplotlib.pyplot as plt
 from Bio import SeqIO
+from Bio.Seq import Seq  # ⚡ NEW: The Biological Translator
 import io
 import requests
 import pandas as pd
@@ -10,7 +11,7 @@ st.set_page_config(page_title="SeqSense Engine", layout="wide", page_icon="🧬"
 st.title("🧬 SeqSense: Precision Genomics Engine")
 st.write("Upload Healthy vs. Tumor FASTA files to identify clinical variants and fetch live biological data.")
 
-# 2. Local Database (The Clinical Map)
+# 2. Local Database
 DRUG_DB = {
     31: {"gene": "BRAF", "variant": "V600E", "drug": "Vemurafenib", "type": "BRAF Inhibitor"},
     1047: {"gene": "PIK3CA", "variant": "H1047R", "drug": "Alpelisib", "type": "PI3K Inhibitor"}
@@ -42,7 +43,7 @@ tumor_file = st.sidebar.file_uploader("Upload Tumor Sequence", type=["fasta", "f
 # 5. Main Application Logic
 if healthy_file and tumor_file:
     if st.button("Run Diagnostic Scan"):
-        with st.spinner("Aligning sequences and querying NIH databases..."):
+        with st.spinner("Aligning sequences, translating proteins, and querying NIH databases..."):
             
             h_raw = io.StringIO(healthy_file.getvalue().decode("utf-8"))
             t_raw = io.StringIO(tumor_file.getvalue().decode("utf-8"))
@@ -56,6 +57,23 @@ if healthy_file and tumor_file:
             for i in range(min_len):
                 if healthy_dna[i] != tumor_dna[i]:
                     pos = i + 1
+                    
+                    # ⚡ NEW BIOLOGY LOGIC: Amino Acid Translation ⚡
+                    # 1. Find which 3-letter codon this mutation belongs to
+                    codon_start = (i // 3) * 3
+                    codon_end = codon_start + 3
+                    
+                    # 2. Extract the healthy and tumor codons
+                    h_codon = healthy_dna[codon_start:codon_end]
+                    t_codon = tumor_dna[codon_start:codon_end]
+                    
+                    # 3. Translate DNA -> Protein using BioPython
+                    h_aa = str(Seq(h_codon).translate()) if len(h_codon) == 3 else "?"
+                    t_aa = str(Seq(t_codon).translate()) if len(t_codon) == 3 else "?"
+                    
+                    protein_impact = f"{h_aa} → {t_aa}"
+                    # -----------------------------------------------
+
                     match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown", "drug": "Research Required", "type": "N/A"})
                     
                     live_info = {"chromosome": "N/A", "description": "N/A"}
@@ -64,7 +82,8 @@ if healthy_file and tumor_file:
                     
                     mutations.append({
                         "Position": pos,
-                        "Mutation": f"{healthy_dna[i]} -> {tumor_dna[i]}",
+                        "DNA Change": f"{healthy_dna[i]} → {tumor_dna[i]}",
+                        "Protein Impact": protein_impact,
                         "Gene": f"{match['gene']} {match['variant']}",
                         "Therapy": f"{match['drug']} ({match['type']})",
                         "Chromosome": live_info["chromosome"],
@@ -75,13 +94,16 @@ if healthy_file and tumor_file:
             if mutations:
                 st.error(f"🚨 {len(mutations)} Somatic Mutation(s) Detected!")
                 
-                st.subheader("📑 Clinical Diagnostic Report (Live Data)")
-                md_table = "| Position | Change | Target Gene | 📍 Locus | 📖 Protein Name | Recommended Therapy |\n|---|---|---|---|---|---|\n"
+                st.subheader("📑 Clinical Diagnostic Report")
+                
+                # ⚡ Updated table to show Protein Impact
+                md_table = "| Position | DNA Change | 🧬 Protein Impact | Target Gene | 📍 Locus | Recommended Therapy |\n"
+                md_table += "|---|---|---|---|---|---|\n"
                 for m in mutations:
-                    md_table += f"| {m['Position']} | **{m['Mutation']}** | {m['Gene']} | {m['Chromosome']} | _{m['Description']}_ | **{m['Therapy']}** |\n"
+                    md_table += f"| {m['Position']} | **{m['DNA Change']}** | **{m['Protein Impact']}** | {m['Gene']} | {m['Chromosome']} | **{m['Therapy']}** |\n"
                 st.markdown(md_table)
                 
-                # ⚡ NEW FEATURE: CSV EXPORT
+                # CSV EXPORT
                 st.subheader("💾 Export Clinical Data")
                 df = pd.DataFrame(mutations)
                 csv = df.to_csv(index=False).encode('utf-8')
@@ -93,6 +115,7 @@ if healthy_file and tumor_file:
                     mime="text/csv",
                 )
                 
+                # Visual Heatmap
                 st.subheader("📊 Genomic Mutation Heatmap")
                 fig, ax = plt.subplots(figsize=(10, 2))
                 ax.plot([1, min_len], [0, 0], color='lightgray', linewidth=6, zorder=1)
