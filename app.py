@@ -1,4 +1,4 @@
-kimport streamlit as st
+import streamlit as st
 from Bio import SeqIO
 from Bio.Seq import Seq
 import io
