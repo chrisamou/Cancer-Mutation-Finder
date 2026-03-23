@@ -7,6 +7,7 @@ import pandas as pd
 import zipfile
 import plotly.express as px
 import plotly.graph_objects as go
+from fpdf import FPDF  # ⚡ NEW: The PDF Generator
 
 # 1. Page Configuration & Branding
 st.set_page_config(page_title="SeqSense Engine", layout="wide", page_icon="🧬")
@@ -34,39 +35,63 @@ def fetch_live_gene_data(gene_symbol):
         pass
     return {"chromosome": "API Offline", "description": "Offline"}
 
-# ⚡ UPDATED: ENSEMBL API CONNECTION (Phase 2 Auto-Fetch)
 @st.cache_data
 def fetch_ensembl_reference(gene_symbol):
-    """Fetches the official wild-type coding sequence (CDS) from Ensembl."""
     server = "https://rest.ensembl.org"
     try:
-        # Step A: Get the Gene ID and expand it to see its transcripts
         ext_lookup = f"/lookup/symbol/homo_sapiens/{gene_symbol}?expand=1"
         res = requests.get(server + ext_lookup, headers={"Accept": "application/json"}, timeout=5)
-        
         if res.ok:
             data = res.json()
-            # Step B: Dive into the data to find the first Transcript ID
             if "Transcript" in data and len(data["Transcript"]) > 0:
                 transcript_id = data["Transcript"][0]["id"]
-                
-                # Step C: Download the raw CDS sequence for that specific transcript
                 ext_seq = f"/sequence/id/{transcript_id}?type=cds"
                 seq_res = requests.get(server + ext_seq, headers={"Accept": "text/plain"}, timeout=5)
-                
                 if seq_res.ok:
                     return seq_res.text.strip().upper()
     except requests.exceptions.RequestException:
         pass
     return None
 
-# 4. SIDEBAR: The Mode Switcher
+# ⚡ NEW: PDF GENERATOR FUNCTION
+def create_pdf_dossier(mutations_list, title="Clinical Diagnostic Report"):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Header
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "SeqSense Precision Genomics", ln=True, align="C")
+    pdf.set_font("Arial", "I", 12)
+    pdf.cell(0, 10, title, ln=True, align="C")
+    pdf.ln(10)
+    
+    # Body
+    pdf.set_font("Arial", size=10)
+    if not mutations_list:
+        pdf.cell(0, 10, "Result: No somatic mutations detected. Sequences match wild-type.", ln=True)
+    else:
+        pdf.set_font("Arial", "B", 11)
+        pdf.cell(0, 10, f"Total Mutations Detected: {len(mutations_list)}", ln=True)
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", size=10)
+        for m in mutations_list:
+            pdf.set_fill_color(240, 240, 240)
+            pdf.cell(0, 8, f" Genomic Position: {m.get('Position', 'N/A')}", ln=True, fill=True)
+            for key, value in m.items():
+                if key != "Position":
+                    pdf.cell(0, 6, f"  • {key}: {value}", ln=True)
+            pdf.ln(5)
+            
+    # Return as bytes for download
+    return pdf.output(dest="S").encode("latin-1")
+
+# 4. SIDEBAR
 st.sidebar.header("⚙️ Analysis Mode")
 mode = st.sidebar.radio("Select Scale:", ["Single Patient", "Batch Cohort (ZIP)"])
 
 st.sidebar.divider()
 
-# ⚡ NEW: REFERENCE DATA SOURCE UI
 st.sidebar.header("🧬 Reference Genome Source")
 ref_method = st.sidebar.radio("How should we load the healthy DNA?", ["Manual Upload", "Auto-Fetch (Ensembl API)"])
 
@@ -90,9 +115,7 @@ if mode == "Single Patient":
 
     if (healthy_file or (ref_method == "Auto-Fetch (Ensembl API)" and target_gene)) and tumor_file:
         if st.button("Run Diagnostic Scan"):
-            
             healthy_dna = None
-            
             with st.spinner("Fetching data and aligning sequences..."):
                 if ref_method == "Auto-Fetch (Ensembl API)":
                     healthy_dna = fetch_ensembl_reference(target_gene)
@@ -107,7 +130,7 @@ if mode == "Single Patient":
                 tumor_dna = str(SeqIO.read(t_raw, "fasta").seq).strip().upper()
                 
                 if abs(len(healthy_dna) - len(tumor_dna)) > 100:
-                    st.warning("⚠️ Length Mismatch Warning: The reference genome and patient genome have significantly different lengths. Ensure you are comparing the correct gene!")
+                    st.warning("⚠️ Length Mismatch Warning: Ensure you are comparing the correct gene!")
 
                 mutations = []
                 min_len = min(len(healthy_dna), len(tumor_dna))
@@ -116,10 +139,8 @@ if mode == "Single Patient":
                     if healthy_dna[i] != tumor_dna[i]:
                         pos = i + 1
                         codon_start = (i // 3) * 3
-                        
                         h_aa = str(Seq(healthy_dna[codon_start:codon_start+3]).translate()) if len(healthy_dna[codon_start:codon_start+3]) == 3 else "?"
                         t_aa = str(Seq(tumor_dna[codon_start:codon_start+3]).translate()) if len(tumor_dna[codon_start:codon_start+3]) == 3 else "?"
-                        
                         match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown", "drug": "Research Required", "type": "N/A"})
                         live_info = fetch_live_gene_data(match["gene"]) if match["gene"] != "Unknown" else {"chromosome": "N/A", "description": "N/A"}
                         
@@ -136,8 +157,14 @@ if mode == "Single Patient":
                     st.error(f"🚨 {len(mutations)} Somatic Mutation(s) Detected!")
                     st.dataframe(pd.DataFrame(mutations), use_container_width=True)
                     
-                    csv = pd.DataFrame(mutations).to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Download Patient Report", data=csv, file_name="patient_report.csv", mime="text/csv")
+                    # ⚡ NEW: SIDE-BY-SIDE DOWNLOAD BUTTONS
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        csv = pd.DataFrame(mutations).to_csv(index=False).encode('utf-8')
+                        st.download_button("📥 Download Data (CSV)", data=csv, file_name="patient_report.csv", mime="text/csv", use_container_width=True)
+                    with col2:
+                        pdf_bytes = create_pdf_dossier(mutations, "Single Patient Oncology Report")
+                        st.download_button("📄 Download Clinical Report (PDF)", data=pdf_bytes, file_name="patient_report.pdf", mime="application/pdf", use_container_width=True)
                     
                     st.subheader("🔍 Interactive Mutation Viewer")
                     fig = go.Figure()
@@ -153,18 +180,13 @@ if mode == "Single Patient":
                 else:
                     st.success("✅ No mutations detected.")
 
-# ---------------------------------------------------------
-# MODE 2: BATCH COHORT (The Big Data Upgrade)
-# ---------------------------------------------------------
 elif mode == "Batch Cohort (ZIP)":
     st.sidebar.header("📁 Upload Clinical Trial Data")
     zip_file = st.sidebar.file_uploader("Upload Patient Cohort (.zip)", type=["zip"])
 
     if (healthy_file or (ref_method == "Auto-Fetch (Ensembl API)" and target_gene)) and zip_file:
         if st.button("Run Cohort Batch Scan"):
-            
             healthy_dna = None
-            
             with st.spinner("Fetching data and processing massive cohort..."):
                 if ref_method == "Auto-Fetch (Ensembl API)":
                     healthy_dna = fetch_ensembl_reference(target_gene)
@@ -176,11 +198,9 @@ elif mode == "Batch Cohort (ZIP)":
                     healthy_dna = str(SeqIO.read(h_raw, "fasta").seq).strip().upper()
             
             master_mutations = []
-            
             with zipfile.ZipFile(zip_file, 'r') as z:
                 fasta_files = [f for f in z.namelist() if f.endswith(('.fasta', '.fa'))]
                 total_files = len(fasta_files)
-                
                 st.write(f"🔍 Found {total_files} patient sequences. Scanning...")
                 
                 progress_bar = st.progress(0)
@@ -188,11 +208,9 @@ elif mode == "Batch Cohort (ZIP)":
                 
                 for idx, file_name in enumerate(fasta_files):
                     status_text.text(f"Processing: {file_name} ({idx+1}/{total_files})")
-                    
                     with z.open(file_name) as f:
                         t_raw = io.StringIO(f.read().decode("utf-8"))
                         tumor_dna = str(SeqIO.read(t_raw, "fasta").seq).strip().upper()
-                        
                         min_len = min(len(healthy_dna), len(tumor_dna))
                         for i in range(min_len):
                             if healthy_dna[i] != tumor_dna[i]:
@@ -200,9 +218,7 @@ elif mode == "Batch Cohort (ZIP)":
                                 codon_start = (i // 3) * 3
                                 h_aa = str(Seq(healthy_dna[codon_start:codon_start+3]).translate()) if len(healthy_dna[codon_start:codon_start+3]) == 3 else "?"
                                 t_aa = str(Seq(tumor_dna[codon_start:codon_start+3]).translate()) if len(tumor_dna[codon_start:codon_start+3]) == 3 else "?"
-                                
                                 match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown"})
-                                
                                 master_mutations.append({
                                     "Patient ID": file_name,
                                     "Position": pos,
@@ -210,7 +226,6 @@ elif mode == "Batch Cohort (ZIP)":
                                     "Protein": f"{h_aa} → {t_aa}",
                                     "Target Gene": match['gene']
                                 })
-                    
                     progress_bar.progress((idx + 1) / total_files)
             
             status_text.text("✅ Cohort scan complete!")
@@ -219,12 +234,18 @@ elif mode == "Batch Cohort (ZIP)":
                 df_master = pd.DataFrame(master_mutations)
                 
                 col1, col2 = st.columns([2, 1])
-                
                 with col1:
                     st.subheader("📑 Master Cohort Table")
                     st.dataframe(df_master, use_container_width=True)
-                    csv = df_master.to_csv(index=False).encode('utf-8')
-                    st.download_button("📥 Download Cohort CSV", data=csv, file_name="cohort_report.csv", mime="text/csv")
+                    
+                    # ⚡ NEW: BATCH PDF EXPORT
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        csv = df_master.to_csv(index=False).encode('utf-8')
+                        st.download_button("📥 Download CSV", data=csv, file_name="cohort_report.csv", mime="text/csv", use_container_width=True)
+                    with c2:
+                        pdf_bytes = create_pdf_dossier(master_mutations, "Master Cohort Analysis Report")
+                        st.download_button("📄 Download Master PDF", data=pdf_bytes, file_name="cohort_report.pdf", mime="application/pdf", use_container_width=True)
                 
                 with col2:
                     st.subheader("📊 Demographics")
