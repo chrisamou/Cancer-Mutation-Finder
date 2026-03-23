@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from Bio import SeqIO
 import io
 import requests
+import pandas as pd
 
 # 1. Page Configuration & Branding
 st.set_page_config(page_title="SeqSense Engine", layout="wide", page_icon="🧬")
@@ -15,10 +16,9 @@ DRUG_DB = {
     1047: {"gene": "PIK3CA", "variant": "H1047R", "drug": "Alpelisib", "type": "PI3K Inhibitor"}
 }
 
-# 3. LIVE API CONNECTION (The Digital Waiter)
+# 3. LIVE API CONNECTION
 @st.cache_data
 def fetch_live_gene_data(gene_symbol):
-    """Fetches live chromosome and description data from the NIH MyGene API."""
     url = f"https://mygene.info/v3/query?q=symbol:{gene_symbol}&fields=symbol,name,map_location"
     try:
         response = requests.get(url, timeout=5)
@@ -31,8 +31,7 @@ def fetch_live_gene_data(gene_symbol):
                     "description": hit.get("name", "Description pending")
                 }
     except requests.exceptions.RequestException:
-        pass # If the internet drops, we silently fail and return the error text below
-    
+        pass
     return {"chromosome": "API Offline", "description": "Could not connect to live database."}
 
 # 4. SIDEBAR: File Uploaders
@@ -42,10 +41,9 @@ tumor_file = st.sidebar.file_uploader("Upload Tumor Sequence", type=["fasta", "f
 
 # 5. Main Application Logic
 if healthy_file and tumor_file:
-    if st.button("Run Diagnostic Scan & Fetch Live Data"):
+    if st.button("Run Diagnostic Scan"):
         with st.spinner("Aligning sequences and querying NIH databases..."):
             
-            # Read and Clean Data
             h_raw = io.StringIO(healthy_file.getvalue().decode("utf-8"))
             t_raw = io.StringIO(tumor_file.getvalue().decode("utf-8"))
             
@@ -55,40 +53,46 @@ if healthy_file and tumor_file:
             mutations = []
             min_len = min(len(healthy_dna), len(tumor_dna))
             
-            # Base-by-Base Comparison
             for i in range(min_len):
                 if healthy_dna[i] != tumor_dna[i]:
                     pos = i + 1
                     match = DRUG_DB.get(pos, {"gene": "Unknown", "variant": "Unknown", "drug": "Research Required", "type": "N/A"})
                     
-                    # ⚡ THE MAGIC: If we recognize the gene, ping the API!
                     live_info = {"chromosome": "N/A", "description": "N/A"}
                     if match["gene"] != "Unknown":
                         live_info = fetch_live_gene_data(match["gene"])
                     
                     mutations.append({
                         "Position": pos,
-                        "Mutation": f"{healthy_dna[i]} → {tumor_dna[i]}",
+                        "Mutation": f"{healthy_dna[i]} -> {tumor_dna[i]}",
                         "Gene": f"{match['gene']} {match['variant']}",
                         "Therapy": f"{match['drug']} ({match['type']})",
                         "Chromosome": live_info["chromosome"],
                         "Description": live_info["description"]
                     })
             
-            # 6. Display Dynamic Results
+            # 6. Display Dynamic Results & Export
             if mutations:
                 st.error(f"🚨 {len(mutations)} Somatic Mutation(s) Detected!")
                 
                 st.subheader("📑 Clinical Diagnostic Report (Live Data)")
-                
-                md_table = "| Position | Change | Target Gene | 📍 Locus (Live) | 📖 Official Protein Name (Live) | Recommended Therapy |\n"
-                md_table += "|---|---|---|---|---|---|\n"
+                md_table = "| Position | Change | Target Gene | 📍 Locus | 📖 Protein Name | Recommended Therapy |\n|---|---|---|---|---|---|\n"
                 for m in mutations:
                     md_table += f"| {m['Position']} | **{m['Mutation']}** | {m['Gene']} | {m['Chromosome']} | _{m['Description']}_ | **{m['Therapy']}** |\n"
-                
                 st.markdown(md_table)
                 
-                # Visual Heatmap
+                # ⚡ NEW FEATURE: CSV EXPORT
+                st.subheader("💾 Export Clinical Data")
+                df = pd.DataFrame(mutations)
+                csv = df.to_csv(index=False).encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Download Report as CSV",
+                    data=csv,
+                    file_name="seqsense_diagnostic_report.csv",
+                    mime="text/csv",
+                )
+                
                 st.subheader("📊 Genomic Mutation Heatmap")
                 fig, ax = plt.subplots(figsize=(10, 2))
                 ax.plot([1, min_len], [0, 0], color='lightgray', linewidth=6, zorder=1)

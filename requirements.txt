@@ -1,3 +1,5 @@
-streamlit
+kstreamlit
 biopython
 matplotlib
+requests
+pandas
