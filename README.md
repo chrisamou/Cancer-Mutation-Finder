@@ -1,22 +1,22 @@
-# 🧬 SeqSense: Precision Genomics Engine
+# 🧬 SeqSense: Precision Genomics Engine (V2.0)
 
-**SeqSense** is a full-stack bioinformatics pipeline and web application designed to identify somatic mutations, translate biological impacts, and generate clinical diagnostic reports in real-time. 
+**SeqSense** is an enterprise-grade bioinformatics pipeline and interactive web application designed to identify somatic mutations, translate biological impacts, and generate clinical diagnostic reports in real-time. 
 
-Built for modern clinical research, SeqSense seamlessly handles single-patient diagnostics as well as massive clinical trial cohorts by comparing wild-type (healthy) reference genomes against patient-derived sequences.
+Built for modern clinical research, SeqSense handles everything from single-patient diagnostics to massive clinical trial cohorts by comparing wild-type reference genomes against patient-derived sequences.
 
-🌐 **[Live Application Server](https://your-url-here.streamlit.app)** *(Note: Add your live URL here!)*
+🌐 **[Live Application Server](https://seqsense.streamlit.app)** *(Note: Ensure this is your actual URL!)*
 
 ---
 
-## ✨ Core Features
+## ✨ V2.0 Enterprise Features
 
-* **🧬 Dynamic Sequence Alignment:** Base-by-base comparison of healthy vs. patient FASTA files to pinpoint exact genomic coordinates of somatic mutations.
-* **🔬 Amino Acid Translation:** Automatically extracts affected codons and utilizes BioPython to translate DNA into proteins, revealing the physical structural impact (e.g., `L → Q`).
-* **📡 Live NIH API Integration:** Queries the National Institutes of Health (NIH) MyGene API in real-time to fetch up-to-date chromosome mapping and official locus descriptions.
-* **💊 Clinical Targeted Therapy Database:** Cross-references detected variants (e.g., *BRAF V600E*, *PIK3CA H1047R*) with an internal database to recommend specific FDA-approved inhibitors.
-* **📊 Big Data Cohort Processing:** Capable of ingesting compressed `.zip` archives containing dozens of patient sequences, running a batch pipeline, and generating a master trial dataframe.
-* **💾 Automated Reporting:** Generates downloadable, clinical-grade CSV diagnostic reports via Pandas.
-* **🗺️ Visual Mutation Heatmaps:** Plots somatic mutations on a genomic axis using Matplotlib.
+* **📡 Ensembl API Auto-Fetch:** Eliminates the need for manual healthy reference uploads. Simply input a target gene (e.g., *PIK3CA*, *BRAF*), and the engine autonomously queries the European Bioinformatics Institute (Ensembl) to download the official wild-type CDS transcript in real-time.
+* **📄 Clinical PDF Dossiers:** Dynamically generates formatted, hospital-ready PDF diagnostic reports (via `fpdf`) alongside standard CSV data exports.
+* **📊 Interactive Visualizations:** Upgraded from static charts to interactive `Plotly` dashboards, featuring hoverable mutation locus maps and cohort demographic pie charts.
+* **🧬 Dynamic Sequence Alignment:** Base-by-base comparison to pinpoint exact genomic coordinates of somatic mutations.
+* **🔬 Amino Acid Translation:** Extracts affected codons and utilizes BioPython to translate DNA into proteins, revealing structural impacts (e.g., `S → R`).
+* **💊 Targeted Therapy Database:** Cross-references detected variants with an internal database to recommend FDA-approved inhibitors, supplemented by real-time locus data from the NIH MyGene API.
+* **📦 Big Data Cohort Processing:** Ingests compressed `.zip` archives containing dozens of patient sequences, runs a batch pipeline with a dynamic progress bar, and generates a master trial dataframe.
 
 ---
 
@@ -24,9 +24,9 @@ Built for modern clinical research, SeqSense seamlessly handles single-patient d
 
 * **Frontend & Cloud Hosting:** Streamlit, Streamlit Community Cloud
 * **Bioinformatics Engine:** BioPython (`SeqIO`, `Seq`)
-* **Data Processing & Export:** Pandas
-* **API Routing:** Python `requests`
-* **Data Visualization:** Matplotlib
+* **Data & Analytics:** Pandas, Plotly (`express`, `graph_objects`)
+* **API Routing:** Python `requests` (NIH MyGene, Ensembl REST API)
+* **Document Generation:** FPDF
 
 ---
 
